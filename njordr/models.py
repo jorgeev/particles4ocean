@@ -11,7 +11,7 @@ import numpy as np
 import xarray as xr
 import cupy_xarray
 
-class njord_water():
+class njordr_water():
     def __init__(self,
                  particles:int=12000, dt:int=1200, 
                  lat0:float=24, lon0:float=-88.5,
@@ -54,9 +54,9 @@ class njord_water():
         self.outputstep = outputstep
         self.water = water
         # How many timestep are needed to finish the simulation
-        self.total_steps = int(self.duration / self.dt)
+        self.total_steps = int(self.duration / self.dt) + 1
         # How many outputs will we get
-        self.total_outputs = int(self.duration / self.outputstep)
+        self.total_outputs = int((self.duration + self.dt) / self.outputstep)
         # Index to initialize new particles
         self.part_idx = cp.array_split(self.trajectories, self.total_steps)
         self.current_idx = self.part_idx[0]
@@ -65,10 +65,10 @@ class njord_water():
         # Initialize first particles
         self.seedparticles(self.current_idx)
         self.water, self.current_time = self.preprocess_water(water)
-        # To save model outputs
+        # To save model outputs and store t0
         self.save_idx = 1
-        self.lon_out = np.empty([self.total_outputs, self.particles])
-        self.lat_out = np.empty([self.total_outputs, self.particles])
+        self.lon_out = np.empty([self.total_outputs+1, self.particles])
+        self.lat_out = np.empty([self.total_outputs+1, self.particles])
         self.lat_out[0] = self.lat.get()
         self.lon_out[0] = self.lon.get()
     
@@ -121,20 +121,26 @@ class njord_water():
         return target_u, target_v
     
     def step(self):
-        #print(self.current_time)
         uu, vv = self.interp_uvt(self.current_time)
         self.lon[self.current_idx] += self.mt2deg(uu*self.dt, self.lat[self.current_idx], 'x') + uu * self.difussivity * cp.random.uniform(-1, 1, size=self.len_cidx)
         self.lat[self.current_idx] += self.mt2deg(vv*self.dt, self.lat[self.current_idx], 'y') + vv * self.difussivity * cp.random.uniform(-1, 1, size=self.len_cidx)
         self.current_time += self.dt    
-        #if self.current_time != 0:
-        # print('Seeding new particles')
+
+        # Initialize next batch of particles
         self.seedparticles(self.part_idx[self.part_next_id])
+        
+        # Update main index of particles
         self.current_idx = cp.concatenate((self.current_idx, self.part_idx[self.part_next_id]))
         self.len_cidx = self.current_idx.shape[0]
-        self.part_next_id += 1
+        self.part_next_id += 1 # Prepare next batch
         
-        if self.current_time%self.outputstep==0:
-            self.lat_out[self.save_idx] = self.lat.get()
-            self.lon_out[self.save_idx] = self.lon.get()
-            self.save_idx += 1
-                
+    
+    def run(self):
+        for ii in range(self.total_steps-1):
+            print(ii, self.current_time + self.dt)
+            self.step()
+        
+            if self.current_time%self.outputstep==0:
+                self.lat_out[self.save_idx] = self.lat.get()
+                self.lon_out[self.save_idx] = self.lon.get()
+                self.save_idx += 1

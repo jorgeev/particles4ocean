@@ -12,22 +12,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 
-from njord.models import njord_water
+from njordr.models import njordr_water
 
-model = njord_water(lon0=-91.88, lat0=19.65, 
-                    particles=100000, dt=360, 
-                    difussivity=0.0, duration=40)
+model = njordr_water(lon0=-91.88, lat0=19, 
+                     particles=100000, dt=3600, 
+                     difussivity=0.1, duration=24)
 print(model.difussivity)
 
-for ii in range(model.total_steps-1):
-    model.step()
+model.run()
 
-fig = plt.figure()
+fig = plt.figure(dpi=150)
 ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
-ax.set_extent([-99.5214,-78.5589,16.5369,32.4075])
-gl = ax.gridlines(crs=ccrs.PlateCarree(), 
-                  draw_labels=True, 
-                  linewidth=0.6, alpha=0.8, linestyle='--')
-ax.scatter(model.lon.get(), model.lat.get(), s=0.5, c='k')
-ax.coastlines()
-fig.show()
+
+for ii in range(model.total_outputs):
+    ax.set_extent([-92.8,-90.7,18.5,19.2])
+    ax.scatter(model.lon_out[ii], model.lat_out[ii], s=0.5, c='k')
+    ax.coastlines()
+    plt.pause(0.2)
+    if ii < model.total_outputs-1:
+        plt.cla()
+
+# fig = plt.figure()
+# ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+# ax.set_extent([-99.5214,-78.5589,16.5369,32.4075])
+# gl = ax.gridlines(crs=ccrs.PlateCarree(), 
+#                   draw_labels=True, 
+#                   linewidth=0.6, alpha=0.8, linestyle='--')
+# ax.scatter(model.lon.get(), model.lat.get(), s=0.5, c='k')
+# ax.coastlines()
+# fig.show()
