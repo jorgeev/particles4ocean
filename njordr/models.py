@@ -3,7 +3,6 @@
 Created on Sun Apr 28 15:34:46 2024
 
 @author: je.velasco
-TODO: Fix correct array filling I have missed 1 output
 """
 import cupy as cp
 from cupyx.scipy.interpolate import interpn
@@ -11,6 +10,7 @@ import numpy as np
 import xarray as xr
 import cupy_xarray
 from netCDF4 import Dataset
+from datetime import timedelta
 
 class njordr_water():
     def __init__(self,
@@ -18,23 +18,25 @@ class njordr_water():
                  lat0:float=24, lon0:float=-88.5,
                  radius:float=100, difussivity:float=0.1,
                  start_time:str='2023-08-12T00:00:00', duration:int=36,
+                 spill_duration:float=1,
                  outputstep:int=3600,
                  earth_radius:float=6371000.,
                  name:str='generic_simulation',
                  water:str='hycom_hd.nc'
                  ):
         """
-        particules  : Total number of particules the model will use
-        dt          : Size of the time step, in seconds
-        lat0        : Source latitude for the model
-        lon0        : Source longitude for the model
-        radius      : Initial disperison radius when initializing new particules
-        start_time  : Start time for the simulation
-        duration    : Duration of the simulation in hours "duration<=particles"
-        outputstep  : Steps where the outputs will be saved "outputstep%dt==0"
-        earth_radius: Earth radius used to correct x
-        name        : Name of the simulation
-        water       : Path to netCDF
+        particules     : Total number of particules the model will use
+        dt             : Size of the time step, in seconds
+        lat0           : Source latitude for the model
+        lon0           : Source longitude for the model
+        radius         : Initial disperison radius when initializing new particules
+        start_time     : Start time for the simulation
+        duration       : Duration of the simulation in hours "duration<=particles"
+        spill_duration : Duration of the spill in hours
+        outputstep     : Steps where the outputs will be saved "outputstep%dt==0"
+        earth_radius   : Earth radius used to correct x
+        name           : Name of the simulation
+        water          : Path to netCDF
         Currently new particles are added every timestep
         """
         self.particles = particles
@@ -44,16 +46,16 @@ class njordr_water():
         self.lon = cp.zeros(particles)
         self.lat = cp.zeros(particles)
         self.dt = dt
-        # self.half_dt = self.dt / 2
         self.earth_radius = earth_radius
         self.earth_radius_rad = 180 / (self.earth_radius * cp.pi)
         self.radius = radius
         self.difussivity = difussivity / np.sqrt(dt)
         self.duration = int(duration * 3600)
+        self.spill_duration = int(spill_duration * 3600)
         self.start_time = start_time
         self.outputstep = outputstep
         self.water = water
-        #self.vault_name = F'{name}.nc'
+        self.case_name = name
         
         # How many timestep are needed to finish the simulation
         self.total_steps = int(self.duration / self.dt)
@@ -61,8 +63,11 @@ class njordr_water():
         # How many outputs will we get
         self.total_outputs = int(self.duration / self.outputstep)
         
+        # How many times will we add particles to the simulation
+        self.spill_steps = int(self.spill_duration / self.dt)
+        
         # Index to initialize new particles
-        self.part_idx = cp.array_split(self.trajectories, self.total_steps + 1)
+        self.part_idx = cp.array_split(self.trajectories, self.spill_steps + 1)
         self.current_idx = self.part_idx[0]
         self.len_cidx = self.current_idx.shape[0]
         self.part_next_id = 1
@@ -72,11 +77,16 @@ class njordr_water():
         self.water, self.current_time = self.preprocess_water(water)
         
         # To save model outputs and store t0
-        self.save_idx = 1
-        self.lon_out = np.empty([self.total_outputs + 1, self.particles])
-        self.lat_out = np.empty([self.total_outputs + 1, self.particles])
-        self.lat_out[0] = self.lat.get()
-        self.lon_out[0] = self.lon.get()
+        # self.save_idx = 1
+        # self.lon_out = np.empty([self.total_outputs + 1, self.particles])
+        # self.lat_out = np.empty([self.total_outputs + 1, self.particles])
+        # self.lat_out[0] = self.lat.get()
+        # self.lon_out[0] = self.lon.get()
+        
+        # To save in a netcdf4 file
+        self.create_netcdf()
+        self.nclat[0] = self.lat.get()
+        self.nclon[0] = self.lon.get()
     
     def preprocess_water(self, water):
         ds = xr.open_dataset(water)
@@ -137,15 +147,41 @@ class njordr_water():
         self.current_time += self.dt    
 
         # Initialize next batch of particles
-        self.seedparticles(self.part_idx[self.part_next_id])
+        if self.part_next_id < self.spill_steps + 1:
+            self.seedparticles(self.part_idx[self.part_next_id])
+            # Update main index of particles
+            self.current_idx = cp.concatenate((self.current_idx, self.part_idx[self.part_next_id]))
         
-        # Update main index of particles
-        self.current_idx = cp.concatenate((self.current_idx, self.part_idx[self.part_next_id]))
         self.loc_nan()
         self.part_next_id += 1 # Prepare next batch
         
-    #def create_netcdf(self):      
-        
+    def create_netcdf(self): 
+        vault_file = F'{self.case_name}.nc'
+        vault = Dataset(vault_file, 'w', format='NETCDF4')
+        vault.createDimension("time", None)
+        vault.createDimension("trajectory", self.particles)
+        traj = vault.createVariable("trajectory", "u8", ("trajectory"))
+        self.nclat = vault.createVariable("lat", "f8", ("time","trajectory"))
+        self.nclon = vault.createVariable("lon", "f8", ("time","trajectory"))
+        traj[:] = self.trajectories.get()
+        traj.cf_role = "trajectory_id"
+        traj.units = "1"
+        self.nclat.units = 'degrees_north'
+        self.nclat.standard_name = 'latitude'
+        self.nclat.long_name = 'latitude'
+        self.nclon.units = 'degrees_east'
+        self.nclon.standard_name = 'longitude'
+        self.nclon.long_name = 'longitude'
+        vault.Conventions = "CF-1.6"
+        vault.standard_name_vocabulary = "CF-1.6"
+        vault.featureType = "trajectory"
+        vault.history = F"Created {np.datetime64('now')}"
+        vault.source = "Output from simulation with njordr"
+        vault.model_url = "https://github.com/jorgeev/particules4ocean"
+        vault.time_coverage_start = "2023-08-12T00:00:00"
+        vault.time_step_calculation = F"{str(timedelta(seconds=self.dt))}"
+        vault.time_step_output = F"{str(timedelta(seconds=self.outputstep))}"
+        self.vault = vault
     
     def run(self):
         for ii in range(self.total_steps):
@@ -153,6 +189,9 @@ class njordr_water():
             self.step()
         
             if self.current_time%self.outputstep==0:
-                self.lat_out[self.save_idx] = self.lat.get()
-                self.lon_out[self.save_idx] = self.lon.get()
-                self.save_idx += 1
+                self.nclat[ii+1, :] = self.lat.get()
+                self.nclon[ii+1, :] = self.lon.get()
+                # self.lat_out[self.save_idx] = self.lat.get()
+                # self.lon_out[self.save_idx] = self.lon.get()
+                #self.save_idx += 1
+        self.vault.close()
