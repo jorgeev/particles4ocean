@@ -10,6 +10,7 @@ from cupyx.scipy.interpolate import interpn
 import numpy as np
 import xarray as xr
 import cupy_xarray
+from netCDF4 import Dataset
 
 class njordr_water():
     def __init__(self,
@@ -35,7 +36,6 @@ class njordr_water():
         name        : Name of the simulation
         water       : Path to netCDF
         Currently new particles are added every timestep
-        TODO: Idenpendent particle seeding and saving
         """
         self.particles = particles
         self.trajectories = cp.arange(particles)
@@ -44,7 +44,7 @@ class njordr_water():
         self.lon = cp.zeros(particles)
         self.lat = cp.zeros(particles)
         self.dt = dt
-        self.half_dt = self.dt / 2
+        # self.half_dt = self.dt / 2
         self.earth_radius = earth_radius
         self.earth_radius_rad = 180 / (self.earth_radius * cp.pi)
         self.radius = radius
@@ -53,22 +53,28 @@ class njordr_water():
         self.start_time = start_time
         self.outputstep = outputstep
         self.water = water
+        #self.vault_name = F'{name}.nc'
+        
         # How many timestep are needed to finish the simulation
-        self.total_steps = int(self.duration / self.dt) + 1
+        self.total_steps = int(self.duration / self.dt)
+        
         # How many outputs will we get
-        self.total_outputs = int((self.duration + self.dt) / self.outputstep)
+        self.total_outputs = int(self.duration / self.outputstep)
+        
         # Index to initialize new particles
-        self.part_idx = cp.array_split(self.trajectories, self.total_steps)
+        self.part_idx = cp.array_split(self.trajectories, self.total_steps + 1)
         self.current_idx = self.part_idx[0]
         self.len_cidx = self.current_idx.shape[0]
         self.part_next_id = 1
+        
         # Initialize first particles
         self.seedparticles(self.current_idx)
         self.water, self.current_time = self.preprocess_water(water)
+        
         # To save model outputs and store t0
         self.save_idx = 1
-        self.lon_out = np.empty([self.total_outputs+1, self.particles])
-        self.lat_out = np.empty([self.total_outputs+1, self.particles])
+        self.lon_out = np.empty([self.total_outputs + 1, self.particles])
+        self.lat_out = np.empty([self.total_outputs + 1, self.particles])
         self.lat_out[0] = self.lat.get()
         self.lon_out[0] = self.lon.get()
     
@@ -76,7 +82,7 @@ class njordr_water():
         ds = xr.open_dataset(water)
         ds_start_time = ds.MT.data[0]
         new_times = np.float32((ds.MT.data - ds.MT.data[0])) / 1000000000 
-        start_time = np.float32(ds_start_time - np.datetime64(self.start_time)) /  1000000000
+        start_time = np.float32(np.datetime64(self.start_time) - ds_start_time) /  1000000000
         water = ds.assign_coords(MT=new_times)
         return water, start_time
         
@@ -120,6 +126,10 @@ class njordr_water():
         target_v = interpn(nc_coords, V, (target_time, Yp, Xp))
         return target_u, target_v
     
+    def loc_nan(self):
+        self.current_idx = self.current_idx[cp.isnan(self.lat[self.current_idx]) != True]
+        self.len_cidx = self.current_idx.shape[0]
+    
     def step(self):
         uu, vv = self.interp_uvt(self.current_time)
         self.lon[self.current_idx] += self.mt2deg(uu*self.dt, self.lat[self.current_idx], 'x') + uu * self.difussivity * cp.random.uniform(-1, 1, size=self.len_cidx)
@@ -131,12 +141,14 @@ class njordr_water():
         
         # Update main index of particles
         self.current_idx = cp.concatenate((self.current_idx, self.part_idx[self.part_next_id]))
-        self.len_cidx = self.current_idx.shape[0]
+        self.loc_nan()
         self.part_next_id += 1 # Prepare next batch
+        
+    #def create_netcdf(self):      
         
     
     def run(self):
-        for ii in range(self.total_steps-1):
+        for ii in range(self.total_steps):
             print(ii, self.current_time + self.dt)
             self.step()
         

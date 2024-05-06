@@ -14,9 +14,10 @@ import cartopy.crs as ccrs
 
 from njordr.models import njordr_water
 
-model = njordr_water(lon0=-91.88, lat0=19, 
-                     particles=100000, dt=3600, 
-                     difussivity=0.1, duration=24)
+model = njordr_water(lon0=-87, lat0=20, 
+                     particles=100000, dt=600, outputstep=3600,
+                     start_time='2023-08-12T00:00:00',
+                     difussivity=0.1, duration=46)
 print(model.difussivity)
 
 model.run()
@@ -25,11 +26,11 @@ fig = plt.figure(dpi=150)
 ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
 
 for ii in range(model.total_outputs):
-    ax.set_extent([-92.8,-90.7,18.5,19.2])
+    ax.set_extent([-89,-85.64,19.31,21.99])
     ax.scatter(model.lon_out[ii], model.lat_out[ii], s=0.5, c='k')
     ax.coastlines()
-    plt.pause(0.2)
-    if ii < model.total_outputs-1:
+    plt.pause(0.5)
+    if ii <= model.total_outputs:
         plt.cla()
 
 # fig = plt.figure()
@@ -40,4 +41,5 @@ for ii in range(model.total_outputs):
 #                   linewidth=0.6, alpha=0.8, linestyle='--')
 # ax.scatter(model.lon.get(), model.lat.get(), s=0.5, c='k')
 # ax.coastlines()
+# ax.set_aspect(1)
 # fig.show()
