@@ -10,7 +10,8 @@ import numpy as np
 import xarray as xr
 import cupy_xarray
 from netCDF4 import Dataset
-from datetime import timedelta
+from datetime import timedelta, datetime
+from cftime import date2num, num2date
 
 class njordr_water():
     def __init__(self,
@@ -53,6 +54,7 @@ class njordr_water():
         self.duration = int(duration * 3600)
         self.spill_duration = int(spill_duration * 3600)
         self.start_time = start_time
+        self.aux_starttime = datetime.strptime(self.start_time, '%Y-%m-%d %H:%M:%S')
         self.outputstep = outputstep
         self.water = water
         self.case_name = name
@@ -87,6 +89,7 @@ class njordr_water():
         self.create_netcdf()
         self.nclat[0] = self.lat.get()
         self.nclon[0] = self.lon.get()
+        self.nctime[0] = date2num(self.aux_starttime + timedelta(seconds=self.current_time), units=self.nctime.units)
     
     def preprocess_water(self, water):
         ds = xr.open_dataset(water)
@@ -163,6 +166,10 @@ class njordr_water():
         traj = vault.createVariable("trajectory", "u8", ("trajectory"))
         self.nclat = vault.createVariable("lat", "f8", ("time","trajectory"))
         self.nclon = vault.createVariable("lon", "f8", ("time","trajectory"))
+        self.nctime = vault.createVariable("time", "f8", ("time"))
+        self.nctime.units = F"seconds since {self.start_time}"
+        self.nctime.standard_name = 'time'
+        self.nctime.calendar = "proleptic_gregorian"
         traj[:] = self.trajectories.get()
         traj.cf_role = "trajectory_id"
         traj.units = "1"
@@ -185,12 +192,16 @@ class njordr_water():
     
     def run(self):
         for ii in range(self.total_steps):
-            print(ii, self.current_time + self.dt)
+            #print(ii, self.current_time + self.dt)
+            print(num2date(self.nctime[ii],
+                           units=self.nctime.units))
             self.step()
         
             if self.current_time%self.outputstep==0:
                 self.nclat[ii+1, :] = self.lat.get()
                 self.nclon[ii+1, :] = self.lon.get()
+                self.nctime[ii+1] = date2num(self.aux_starttime + timedelta(seconds=self.current_time), units=self.nctime.units)
+                #self.nctime[ii+1] = self.current_time
                 # self.lat_out[self.save_idx] = self.lat.get()
                 # self.lon_out[self.save_idx] = self.lon.get()
                 #self.save_idx += 1
