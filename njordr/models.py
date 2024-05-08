@@ -78,8 +78,7 @@ class njordr_water():
         self.seedparticles(self.current_idx)
         self.water, self.current_time = self.preprocess_water(water)
         
-        # To save model outputs and store t0
-        # self.save_idx = 1
+        # To save model outputs and store t0       
         # self.lon_out = np.empty([self.total_outputs + 1, self.particles])
         # self.lat_out = np.empty([self.total_outputs + 1, self.particles])
         # self.lat_out[0] = self.lat.get()
@@ -90,6 +89,7 @@ class njordr_water():
         self.nclat[0] = self.lat.get()
         self.nclon[0] = self.lon.get()
         self.nctime[0] = date2num(self.aux_starttime + timedelta(seconds=self.current_time), units=self.nctime.units)
+        self.save_idx = 1
     
     def preprocess_water(self, water):
         ds = xr.open_dataset(water)
@@ -139,11 +139,16 @@ class njordr_water():
         target_v = interpn(nc_coords, V, (target_time, Yp, Xp))
         return target_u, target_v
     
-    def loc_nan(self):
+    def loc_nan(self, lon, lat):
+        backup = self.current_idx[cp.isnan(self.lat[self.current_idx]) != False]
         self.current_idx = self.current_idx[cp.isnan(self.lat[self.current_idx]) != True]
+        self.lon[backup] = lon[backup]
+        self.lat[backup] = lat[backup]
         self.len_cidx = self.current_idx.shape[0]
     
     def step(self):
+        old_lon = self.lon[self.current_idx].copy()
+        old_lat = self.lat[self.current_idx].copy()
         uu, vv = self.interp_uvt(self.current_time)
         self.lon[self.current_idx] += self.mt2deg(uu*self.dt, self.lat[self.current_idx], 'x') + uu * self.difussivity * cp.random.uniform(-1, 1, size=self.len_cidx)
         self.lat[self.current_idx] += self.mt2deg(vv*self.dt, self.lat[self.current_idx], 'y') + vv * self.difussivity * cp.random.uniform(-1, 1, size=self.len_cidx)
@@ -154,19 +159,23 @@ class njordr_water():
             self.seedparticles(self.part_idx[self.part_next_id])
             # Update main index of particles
             self.current_idx = cp.concatenate((self.current_idx, self.part_idx[self.part_next_id]))
+            self.part_next_id += 1 # Prepare next batch
         
-        self.loc_nan()
-        self.part_next_id += 1 # Prepare next batch
+        self.loc_nan(old_lon, old_lat)    
         
     def create_netcdf(self): 
         vault_file = F'{self.case_name}.nc'
         vault = Dataset(vault_file, 'w', format='NETCDF4')
-        vault.createDimension("time", None)
-        vault.createDimension("trajectory", self.particles)
-        traj = vault.createVariable("trajectory", "u8", ("trajectory"))
-        self.nclat = vault.createVariable("lat", "f8", ("time","trajectory"))
-        self.nclon = vault.createVariable("lon", "f8", ("time","trajectory"))
-        self.nctime = vault.createVariable("time", "f8", ("time"))
+        # vault.createDimension("time", None)
+        vault.createDimension("obs", None)
+        vault.createDimension("traj", self.particles)
+        traj = vault.createVariable("trajectory", "u8", ("traj"))
+        # self.nclat = vault.createVariable("lat", "f8", ("time","trajectory"))
+        # self.nclon = vault.createVariable("lon", "f8", ("time","trajectory"))
+        # self.nctime = vault.createVariable("time", "f8", ("time"))
+        self.nclat = vault.createVariable("lat", "f8", ("obs","traj"))
+        self.nclon = vault.createVariable("lon", "f8", ("obs","traj"))
+        self.nctime = vault.createVariable("time", "f8", ("obs"))
         self.nctime.units = F"seconds since {self.start_time}"
         self.nctime.standard_name = 'time'
         self.nctime.calendar = "proleptic_gregorian"
@@ -192,17 +201,15 @@ class njordr_water():
     
     def run(self):
         for ii in range(self.total_steps):
-            #print(ii, self.current_time + self.dt)
-            print(num2date(self.nctime[ii],
-                           units=self.nctime.units))
+            print(ii, self.current_time + self.dt)
             self.step()
         
             if self.current_time%self.outputstep==0:
-                self.nclat[ii+1, :] = self.lat.get()
-                self.nclon[ii+1, :] = self.lon.get()
-                self.nctime[ii+1] = date2num(self.aux_starttime + timedelta(seconds=self.current_time), units=self.nctime.units)
-                #self.nctime[ii+1] = self.current_time
+                self.nclat[self.save_idx, :] = self.lat.get()
+                self.nclon[self.save_idx, :] = self.lon.get()
+                self.nctime[self.save_idx] = date2num(self.aux_starttime + timedelta(seconds=self.current_time), units=self.nctime.units)
+                # self.nctime[ii+1] = self.current_time
                 # self.lat_out[self.save_idx] = self.lat.get()
                 # self.lon_out[self.save_idx] = self.lon.get()
-                #self.save_idx += 1
+                self.save_idx += 1
         self.vault.close()

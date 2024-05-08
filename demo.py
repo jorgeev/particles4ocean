@@ -9,7 +9,6 @@ simple layout of the model
 import cupy as cp
 import xarray as xr
 import cupy_xarray
-import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 
@@ -19,7 +18,7 @@ model = njordr_water(lon0=-87, lat0=20,
                      particles=10000, dt=600, outputstep=1800,
                      start_time='2023-08-12 00:00:00',
                      spill_duration=3,
-                     difussivity=0.1, duration=72)
+                     difussivity=0.1, duration=36)
 print(model.difussivity)
 model.run()
 
@@ -34,5 +33,3 @@ ax.coastlines()
 ax.set_aspect(1)
 fig.show()
 
-ds = xr.open_dataset("generic_simulation.nc")
-ds
