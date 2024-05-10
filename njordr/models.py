@@ -44,8 +44,8 @@ class njordr_water():
         self.trajectories = cp.arange(particles)
         self.lat0 = lat0
         self.lon0 = lon0
-        self.lon = cp.zeros(particles)
-        self.lat = cp.zeros(particles)
+        self.lon = cp.full(particles, np.nan)
+        self.lat = cp.full(particles, np.nan)
         self.dt = dt
         self.earth_radius = earth_radius
         self.earth_radius_rad = 180 / (self.earth_radius * cp.pi)
@@ -178,7 +178,6 @@ class njordr_water():
         self.nctime = vault.createVariable("time", "f8", ("obs"))
         self.nctime.units = F"seconds since {self.start_time}"
         self.nctime.standard_name = 'time'
-        # self.nctime.calendar = "proleptic_gregorian"
         traj[:] = self.trajectories.get()
         traj.cf_role = "trajectory_id"
         traj.units = "1"
