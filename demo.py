@@ -18,7 +18,7 @@ model = njordr_water(lon0=-87, lat0=20,
                      particles=5000000, dt=60, outputstep=3600,
                      start_time='2023-08-12 00:00:00',
                      spill_duration=10,
-                     difussivity=0.1, duration=46)
+                     difussivity=0.1, duration=90)
 print(model.difussivity)
 model.run()
 
