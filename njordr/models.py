@@ -86,8 +86,8 @@ class njordr_water():
         
         # To save in a netcdf4 file
         self.create_netcdf()
-        self.nclat[0] = self.lat.get()
-        self.nclon[0] = self.lon.get()
+        self.nclat[:, 0] = self.lat.get()
+        self.nclon[:, 0] = self.lon.get()
         self.nctime[0] = date2num(self.aux_starttime + timedelta(seconds=self.current_time), units=self.nctime.units)
         self.save_idx = 1
     
@@ -140,10 +140,10 @@ class njordr_water():
         return target_u, target_v
     
     def loc_nan(self, lon, lat):
-        backup = self.current_idx[cp.isnan(self.lat[self.current_idx]) != False]
+        #backup = self.current_idx[cp.isnan(self.lat[self.current_idx]) != False]
         self.current_idx = self.current_idx[cp.isnan(self.lat[self.current_idx]) != True]
-        self.lon[backup] = lon[backup]
-        self.lat[backup] = lat[backup]
+        #self.lon[backup] = lon[backup]
+        #self.lat[backup] = lat[backup]
         self.len_cidx = self.current_idx.shape[0]
     
     def step(self):
@@ -173,12 +173,12 @@ class njordr_water():
         # self.nclat = vault.createVariable("lat", "f8", ("time","trajectory"))
         # self.nclon = vault.createVariable("lon", "f8", ("time","trajectory"))
         # self.nctime = vault.createVariable("time", "f8", ("time"))
-        self.nclat = vault.createVariable("lat", "f8", ("obs","traj"))
-        self.nclon = vault.createVariable("lon", "f8", ("obs","traj"))
+        self.nclat = vault.createVariable("lat", "f8", ("traj","obs"))
+        self.nclon = vault.createVariable("lon", "f8", ("traj","obs"))
         self.nctime = vault.createVariable("time", "f8", ("obs"))
         self.nctime.units = F"seconds since {self.start_time}"
         self.nctime.standard_name = 'time'
-        self.nctime.calendar = "proleptic_gregorian"
+        # self.nctime.calendar = "proleptic_gregorian"
         traj[:] = self.trajectories.get()
         traj.cf_role = "trajectory_id"
         traj.units = "1"
@@ -205,8 +205,8 @@ class njordr_water():
             self.step()
         
             if self.current_time%self.outputstep==0:
-                self.nclat[self.save_idx, :] = self.lat.get()
-                self.nclon[self.save_idx, :] = self.lon.get()
+                self.nclat[:, self.save_idx] = self.lat.get()
+                self.nclon[:, self.save_idx] = self.lon.get()
                 self.nctime[self.save_idx] = date2num(self.aux_starttime + timedelta(seconds=self.current_time), units=self.nctime.units)
                 # self.nctime[ii+1] = self.current_time
                 # self.lat_out[self.save_idx] = self.lat.get()

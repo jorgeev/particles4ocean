@@ -15,10 +15,10 @@ import cartopy.crs as ccrs
 from njordr.models import njordr_water
 
 model = njordr_water(lon0=-87, lat0=20, 
-                     particles=10000, dt=600, outputstep=1800,
+                     particles=10000, dt=1800, outputstep=3600,
                      start_time='2023-08-12 00:00:00',
-                     spill_duration=3,
-                     difussivity=0.1, duration=36)
+                     spill_duration=5,
+                     difussivity=0.1, duration=72)
 print(model.difussivity)
 model.run()
 
