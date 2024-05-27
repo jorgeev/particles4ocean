@@ -263,6 +263,7 @@ class njordr_waterwind():
             self.water = water
             self.wind =  wind
             self.case_name = name
+            self.windage = windage
             
             # How many timestep are needed to finish the simulation
             self.total_steps = int(self.duration / self.dt)
@@ -281,13 +282,13 @@ class njordr_waterwind():
             
             # Initialize first particles
             self.seedparticles(self.current_idx)
-            self.water, self.water_current_time, self.wind, self.wind_current_time = self.preprocess_water(self.water, self.wind)
+            self.water, self.water_current_time, self.wind, self.wind_current_time = self.preprocess_ncfiles(self.water, self.wind)
             
             # To save in a netcdf4 file
             self.create_netcdf()
             self.nclat[:, 0] = self.lat.get()
             self.nclon[:, 0] = self.lon.get()
-            self.nctime[0] = date2num(self.aux_starttime + timedelta(seconds=self.current_time), units=self.nctime.units)
+            self.nctime[0] = date2num(self.aux_starttime + timedelta(seconds=self.water_current_time), units=self.nctime.units)
             self.save_idx = 1
         
     def preprocess_ncfiles(self, water, wind):
@@ -315,36 +316,115 @@ class njordr_waterwind():
         self.lon[target_idx] = self.lon0 + self.mt2deg(self.radius, self.lat0, axis='x') * cp.random.normal(size=target_idx.shape[0])
         self.lat[target_idx] = self.lat0 + self.mt2deg(self.radius, self.lat0, axis='y') * cp.random.normal(size=target_idx.shape[0])
     
-    def interp_uvt(self, time):
+    def interp_uvt(self, time_w, time_h20):
         # Reduce the data to a smaller interpolation
-        time0 = time - 3700
-        time1 = time + 3700
+        time0 = time_h20 - 3700
+        time1 = time_h20 + 3700
+        time0w = time_w - 3700
+        time1w = time_w + 3700
         Xp = self.lon[self.current_idx]
         Yp = self.lat[self.current_idx]
         X_max = cp.max(Xp)+0.1
+        X_maxw =  X_max + 0.5
         X_min = cp.min(Xp)-0.1
+        X_minw =  X_min - 0.5
         Y_max = cp.max(Yp)+0.1
+        Y_maxw =  Y_max + 0.5
         Y_min = cp.min(Yp)-0.1
-        target_time = cp.zeros(self.len_cidx) + time
+        Y_minw =  Y_min - 0.5
+        target_time_h = cp.zeros(self.len_cidx) + time_h20
+        target_time_w = cp.zeros(self.len_cidx) + time_w
         
         watercp = self.water.isel(Depth=0).sel(Latitude=slice(Y_min.get(), Y_max.get()), 
                                                Longitude=slice(X_min.get(), X_max.get()), 
                                                MT=slice(time0, time1))
-        windcp =  self.wind.sel(latitude=slice(Y_min.get(), Y_max.get()), 
-                                longitude=slice(X_min.get(), X_max.get()), 
-                                time=slice(time0, time1))
-        
-        # Create cupy vars
+        windcp =  self.wind.sel(latitude=slice(Y_maxw.get(), Y_minw.get()), 
+                                longitude=slice(X_minw.get(), X_maxw.get()),
+                                time=slice(time0w, time1w))
+
+        # Create cupy vars for hycom
         LLat = cp.array(watercp.Latitude.data)
         LLon = cp.array(watercp.Longitude.data)
         TTime = cp.array(watercp.MT.data)
         U = cp.array(watercp['u'].data)
         V = cp.array(watercp['v'].data)
         nc_coords = (TTime, LLat, LLon)
-
+        # Create cupy vars for era5
+        LLatw = cp.array(windcp.latitude.data)
+        LLonw = cp.array(windcp.longitude.data)
+        TTimew = cp.array(windcp.time.data)
+        U10 = cp.array(windcp['u10'].data)
+        V10 = cp.array(windcp['v10'].data)
+        nc_coordsw = (TTimew, LLatw, LLonw)
         # interpolate fields
-        target_u = interpn(nc_coords, U, (target_time, Yp, Xp))
-        target_v = interpn(nc_coords, V, (target_time, Yp, Xp))
-        return target_u, target_v
+        hcm_target_u = interpn(nc_coords, U, (target_time_h, Yp, Xp))
+        hcm_target_v = interpn(nc_coords, V, (target_time_h, Yp, Xp))
+        era_target_u = interpn(nc_coordsw, U10, (target_time_w, Yp, Xp))
+        era_target_v = interpn(nc_coordsw, V10, (target_time_w, Yp, Xp))
+        return hcm_target_u + self.windage * era_target_u , hcm_target_v + self.windage * era_target_v
 
+    def loc_nan(self, lon, lat):
+        self.current_idx = self.current_idx[cp.isnan(self.lat[self.current_idx]) != True]
+        self.len_cidx = self.current_idx.shape[0]
+    
+    def step(self):
+        old_lon = self.lon[self.current_idx].copy()
+        old_lat = self.lat[self.current_idx].copy()
+        uu, vv = self.interp_uvt(self.wind_current_time, self.water_current_time)
+        self.lon[self.current_idx] += self.mt2deg(uu*self.dt, self.lat[self.current_idx], 'x') + uu * self.difussivity * cp.random.uniform(-1, 1, size=self.len_cidx)
+        self.lat[self.current_idx] += self.mt2deg(vv*self.dt, self.lat[self.current_idx], 'y') + vv * self.difussivity * cp.random.uniform(-1, 1, size=self.len_cidx)
+        self.water_current_time += self.dt
+        self.wind_current_time += self.dt
+
+        # Initialize next batch of particles
+        if self.part_next_id < self.spill_steps + 1:
+            self.seedparticles(self.part_idx[self.part_next_id])
+            # Update main index of particles
+            self.current_idx = cp.concatenate((self.current_idx, self.part_idx[self.part_next_id]))
+            self.part_next_id += 1 # Prepare next batch
+        
+        self.loc_nan(old_lon, old_lat)    
+        
+    def create_netcdf(self): 
+        vault_file = F'{self.case_name}.nc'
+        vault = Dataset(vault_file, 'w', format='NETCDF4')
+        vault.createDimension("obs", None)
+        vault.createDimension("traj", self.particles)
+        traj = vault.createVariable("trajectory", "u8", ("traj"))
+        self.nclat = vault.createVariable("lat", "f8", ("traj","obs"))
+        self.nclon = vault.createVariable("lon", "f8", ("traj","obs"))
+        self.nctime = vault.createVariable("time", "f8", ("obs"))
+        self.nctime.units = F"seconds since {self.start_time}"
+        self.nctime.standard_name = 'time'
+        traj[:] = self.trajectories.get()
+        traj.cf_role = "trajectory_id"
+        traj.units = "1"
+        self.nclat.units = 'degrees_north'
+        self.nclat.standard_name = 'latitude'
+        self.nclat.long_name = 'latitude'
+        self.nclon.units = 'degrees_east'
+        self.nclon.standard_name = 'longitude'
+        self.nclon.long_name = 'longitude'
+        vault.Conventions = "CF-1.6"
+        vault.standard_name_vocabulary = "CF-1.6"
+        vault.featureType = "trajectory"
+        vault.history = F"Created {np.datetime64('now')}"
+        vault.source = "Output from simulation with njordr"
+        vault.model_url = "https://github.com/jorgeev/particules4ocean"
+        vault.time_coverage_start = "2023-08-12T00:00:00"
+        vault.time_step_calculation = F"{str(timedelta(seconds=self.dt))}"
+        vault.time_step_output = F"{str(timedelta(seconds=self.outputstep))}"
+        self.vault = vault
+    
+    def run(self):
+        for ii in range(self.total_steps):
+            print(ii, self.water_current_time + self.dt)
+            self.step()
+        
+            if self.water_current_time%self.outputstep==0:
+                self.nclat[:, self.save_idx] = self.lat.get()
+                self.nclon[:, self.save_idx] = self.lon.get()
+                self.nctime[self.save_idx] = date2num(self.aux_starttime + timedelta(seconds=self.water_current_time), units=self.nctime.units)
+                self.save_idx += 1
+        self.vault.close()
 
