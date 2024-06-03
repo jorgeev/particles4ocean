@@ -8,8 +8,8 @@ c.retrieve(
     {'product_type': 'reanalysis',
      'variable': ['10m_u_component_of_wind', '10m_v_component_of_wind'],
      'year': '2023',
-     'month': '08',
-     'day' : ['12', '13', '14', '15'],
+     'month': '02',
+     'day' : ['08', '09', '10', '11', '12', '13'],
      'time': ['00:00', '01:00', '02:00',
               '03:00', '04:00', '05:00',
               '06:00', '07:00', '08:00',
@@ -20,5 +20,5 @@ c.retrieve(
               '21:00', '22:00', '23:00',],
 	'format': 'netcdf',
     'area': [ 32, -98, 18, -77,],},
-	'era5_uv10.nc')
+	'era5_uv10_validacion.nc')
             
