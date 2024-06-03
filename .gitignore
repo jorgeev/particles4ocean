@@ -154,3 +154,5 @@ cython_debug/
 # ndtCDF files
 *.nc
 *.nc4
+*.png
+*.jpg
