@@ -91,7 +91,19 @@ class wind_model():
         new_times = np.float32((ds['XTIME'].data - ds['XTIME'].data[0])) / 1000000000 
         start_time = np.float32(np.datetime64(self.start_time) - ds_start_time) /  1000000000
         wind = ds.assign_coords(XTIME=new_times)
-        return wind, start_time
+        
+        lon = ds.XLONG.data[0,0]
+        lat = ds.XLAT.data[0,:,0]
+        
+        wind2 = xr.Dataset(coords={
+            'lon':(('lon'), lon),
+            'lat':(('lat'), lat),
+            'time': (('time'), new_times),})
+        
+        wind2['U10'] = (('time', 'lat', 'lon'), wind['U10'].data)
+        wind2['V10'] = (('time', 'lat', 'lon'), wind['V10'].data)
+        
+        return wind2, start_time
         
     def mt2deg(self, distance:float, lat:float, axis:str):
         if axis == 'x':
@@ -116,12 +128,12 @@ class wind_model():
         Y_min = np.min(Yp)-0.1
         target_time = np.zeros(self.len_cidx) + time
         # TODO Fix interpolation
-        windcp = self.wind.sel(XTIME=slice(time0, time1))
+        windcp = self.wind.sel(time=slice(time0, time1))
         
         # Create cupy vars
-        LLat = np.array(windcp.XLAT.data)
-        LLon = np.array(windcp.XLONG.data)
-        TTime = np.array(windcp.XTIME.data)
+        LLat = np.array(windcp.lat.data)
+        LLon = np.array(windcp.lon.data)
+        TTime = np.array(windcp.time.data)
         U = np.array(windcp['U10'].data)
         V = np.array(windcp['V10'].data)
         nc_coords = (TTime, LLat, LLon)
@@ -185,7 +197,7 @@ class wind_model():
         
     def run(self):
         for ii in range(self.total_steps):
-            #print(ii, self.current_time + self.dt)
+            print(ii, self.current_time + self.dt)
             self.step()
         
             if self.current_time%self.outputstep==0:
